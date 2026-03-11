@@ -14,7 +14,6 @@ You can use one tool:
 Workflow:
 - Understand user intent directly from the request.
 - When information is enough, call generate_instructions.
-- After generate_instructions returns, respond with a concise plain-text reply.
 - Make sure each command is executable and has a matching description.
 """.strip(),
             ),

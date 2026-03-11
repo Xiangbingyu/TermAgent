@@ -18,7 +18,6 @@ def run_manual(config: AppConfig, user_input: str | None) -> None:
         return
     while True:
         result = manual.suggest(user_input)
-        ui.show_reply(result.reply)
         ui.show_suggestions(result.suggestions)
         selected = ui.choose_command(result.suggestions)
         if not selected:

@@ -10,5 +10,4 @@ class ManualSuggestion:
 
 @dataclass(frozen=True)
 class ManualResult:
-    reply: str
     suggestions: List[ManualSuggestion]
