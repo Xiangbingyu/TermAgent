@@ -1,5 +1,6 @@
 import json
 import os
+import platform
 import tempfile
 from collections import deque
 from typing import List
@@ -39,12 +40,13 @@ class ManualMode:
             maxlen=200,
         )
 
-    def suggest(self, user_input: str) -> ManualResult:
+    def suggest(self, user_input: str, current_directory: str) -> ManualResult:
         prompt_messages = self.prompt.format_messages(user_input=user_input)
         system_message = prompt_messages[0]
         current_message = HumanMessage(content=user_input)
+        runtime_message = self._build_runtime_message(current_directory)
         command_history_message = self._build_command_history_message()
-        context_messages = [*self.history]
+        context_messages = [runtime_message, *self.history]
         if command_history_message:
             context_messages.append(command_history_message)
         messages = [system_message, *context_messages, current_message]
@@ -78,6 +80,21 @@ class ManualMode:
             )
         else:
             content = "用户选择了 Generate a new suggestion，请继续生成新候选。"
+        self.history.append(HumanMessage(content=content))
+
+    def record_dismiss_request(self, suggestions: List[ManualSuggestion]) -> None:
+        if suggestions:
+            suggestion_lines = "\n".join(
+                f"- {item.command} | {item.description}" for item in suggestions
+            )
+            content = (
+                "用户选择了 Dismiss，本轮未执行命令。候选如下：\n"
+                f"{suggestion_lines}"
+            )
+        else:
+            content = "用户选择了 Dismiss，本轮未执行命令。"
+        self.executed_commands.append(content)
+        self._save_session_commands()
         self.history.append(HumanMessage(content=content))
 
     def record_executed_command(self, command: str) -> None:
@@ -126,6 +143,16 @@ class ManualMode:
             content=(
                 "当前终端已执行命令记录（终端关闭后清空）：\n"
                 f"{commands}"
+            )
+        )
+
+    def _build_runtime_message(self, current_directory: str) -> HumanMessage:
+        resolved_directory = current_directory.strip() or os.getcwd()
+        return HumanMessage(
+            content=(
+                "当前运行环境:\n"
+                f"- 操作系统: {platform.system()} ({os.name})\n"
+                f"- 当前目录: {resolved_directory}"
             )
         )
 

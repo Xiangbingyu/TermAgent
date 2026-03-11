@@ -20,10 +20,11 @@ def run_manual(config: AppConfig, user_input: str | None) -> None:
     if should_exit(user_input):
         return
     while True:
-        result = manual.suggest(user_input)
+        result = manual.suggest(user_input, executor.cwd)
         ui.show_suggestions(result.suggestions)
         selected = ui.choose_command(result.suggestions)
         if not selected:
+            manual.record_dismiss_request(result.suggestions)
             user_input = ui.get_prompt()
             if should_exit(user_input):
                 return
