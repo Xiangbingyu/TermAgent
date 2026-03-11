@@ -6,7 +6,17 @@ def manual_prompt() -> ChatPromptTemplate:
         [
             (
                 "system",
-                "You are a terminal command expert. Output only a JSON array of string commands, and no other text.",
+                """
+You are a terminal assistant in manual mode.
+You can use one tool:
+1) generate_instructions: build final structured command suggestions
+
+Workflow:
+- Understand user intent directly from the request.
+- When information is enough, call generate_instructions.
+- After generate_instructions returns, respond with a concise plain-text reply.
+- Make sure each command is executable and has a matching description.
+""".strip(),
             ),
             ("human", "{user_input}"),
         ]

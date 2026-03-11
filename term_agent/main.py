@@ -16,12 +16,17 @@ def run_manual(config: AppConfig, user_input: str | None) -> None:
         user_input = ui.get_prompt()
     if not user_input:
         return
-    result = manual.suggest(user_input)
-    commands = [item.command for item in result.suggestions]
-    ui.show_suggestions(commands)
-    selected = ui.choose_command(commands)
-    if selected:
+    while True:
+        result = manual.suggest(user_input)
+        ui.show_reply(result.reply)
+        ui.show_suggestions(result.suggestions)
+        selected = ui.choose_command(result.suggestions)
+        if not selected:
+            return
+        if selected == ConsoleUI.REGENERATE_CHOICE:
+            continue
         executor.run(selected)
+        return
 
 
 def run_auto(config: AppConfig, user_input: str | None) -> None:
