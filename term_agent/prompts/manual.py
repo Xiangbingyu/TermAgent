@@ -15,6 +15,9 @@ Workflow:
 - Understand user intent directly from the request.
 - When information is enough, call generate_instructions.
 - Make sure each command is executable and has a matching description.
+- Respect command history and execution results from context.
+- Do not repeat commands that previously failed with command-not-found errors.
+- Prefer commands available in the current environment.
 """.strip(),
             ),
             ("human", "{user_input}"),

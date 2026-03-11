@@ -1,4 +1,6 @@
 import json
+import os
+import tempfile
 from collections import deque
 from typing import List
 
@@ -31,13 +33,21 @@ class ManualMode:
         self.chat = build_chat_model(config)
         self.chat_with_tools = self.chat.bind_tools([tool])
         self.prompt = manual_prompt()
-        self.history: deque[BaseMessage] = deque(maxlen=20)
+        self.history: deque[BaseMessage] = deque(maxlen=80)
+        self.executed_commands: deque[str] = deque(
+            self._load_session_commands(),
+            maxlen=200,
+        )
 
     def suggest(self, user_input: str) -> ManualResult:
         prompt_messages = self.prompt.format_messages(user_input=user_input)
         system_message = prompt_messages[0]
         current_message = HumanMessage(content=user_input)
-        messages = [system_message, *self.history, current_message]
+        command_history_message = self._build_command_history_message()
+        context_messages = [*self.history]
+        if command_history_message:
+            context_messages.append(command_history_message)
+        messages = [system_message, *context_messages, current_message]
         response = self.chat_with_tools.invoke(messages)
         self.history.append(current_message)
         self.history.append(response)
@@ -56,6 +66,97 @@ class ManualMode:
             ]
             return ManualResult(suggestions=suggestions)
         return ManualResult(suggestions=[])
+
+    def record_regenerate_request(self, suggestions: List[ManualSuggestion]) -> None:
+        if suggestions:
+            suggestion_lines = "\n".join(
+                f"- {item.command} | {item.description}" for item in suggestions
+            )
+            content = (
+                "用户选择了 Generate a new suggestion，请基于以下已有候选继续优化：\n"
+                f"{suggestion_lines}"
+            )
+        else:
+            content = "用户选择了 Generate a new suggestion，请继续生成新候选。"
+        self.history.append(HumanMessage(content=content))
+
+    def record_executed_command(self, command: str) -> None:
+        normalized = command.strip()
+        if not normalized:
+            return
+        self.executed_commands.append(normalized)
+        self._save_session_commands()
+        self.history.append(HumanMessage(content=f"终端已执行命令: {normalized}"))
+
+    def record_command_result(
+        self,
+        command: str,
+        return_code: int,
+        stdout: str,
+        stderr: str,
+        cwd: str,
+    ) -> None:
+        normalized = command.strip()
+        if not normalized:
+            return
+        stdout_text = self._limit_text(stdout.strip())
+        stderr_text = self._limit_text(stderr.strip())
+        output_text = stdout_text or "无"
+        error_text = stderr_text or "无"
+        summary = (
+            "命令执行结果:\n"
+            f"- 命令: {normalized}\n"
+            f"- 工作目录: {cwd}\n"
+            f"- 退出码: {return_code}\n"
+            f"- 标准输出: {output_text}\n"
+            f"- 错误输出: {error_text}"
+        )
+        self.executed_commands.append(summary)
+        self._save_session_commands()
+        self.history.append(HumanMessage(content=summary))
+
+    def _build_command_history_message(self) -> HumanMessage | None:
+        if not self.executed_commands:
+            return None
+        commands = "\n".join(
+            f"{index + 1}. {command}"
+            for index, command in enumerate(self.executed_commands)
+        )
+        return HumanMessage(
+            content=(
+                "当前终端已执行命令记录（终端关闭后清空）：\n"
+                f"{commands}"
+            )
+        )
+
+    def _limit_text(self, content: str, max_chars: int = 1200) -> str:
+        if len(content) <= max_chars:
+            return content
+        return f"{content[:max_chars]}...(已截断)"
+
+    def _session_file_path(self) -> str:
+        parent_pid = os.getppid()
+        base_dir = os.path.join(tempfile.gettempdir(), "term-agent-manual")
+        os.makedirs(base_dir, exist_ok=True)
+        return os.path.join(base_dir, f"{parent_pid}.json")
+
+    def _load_session_commands(self) -> List[str]:
+        path = self._session_file_path()
+        try:
+            with open(path, "r", encoding="utf-8") as file:
+                payload = json.load(file)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return []
+        commands = payload.get("commands", [])
+        if not isinstance(commands, list):
+            return []
+        return [str(item) for item in commands]
+
+    def _save_session_commands(self) -> None:
+        path = self._session_file_path()
+        payload = {"commands": list(self.executed_commands)}
+        with open(path, "w", encoding="utf-8") as file:
+            json.dump(payload, file, ensure_ascii=False)
 
     def generate_instructions(
         self,

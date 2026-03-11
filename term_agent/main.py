@@ -9,23 +9,39 @@ from term_agent.tasks import AgentEngine
 
 
 def run_manual(config: AppConfig, user_input: str | None) -> None:
+    def should_exit(text: str | None) -> bool:
+        return not text or text.strip() == "\\q"
+
     ui = ConsoleUI()
     manual = ManualMode(config)
     executor = CommandExecutor()
     if not user_input:
         user_input = ui.get_prompt()
-    if not user_input:
+    if should_exit(user_input):
         return
     while True:
         result = manual.suggest(user_input)
         ui.show_suggestions(result.suggestions)
         selected = ui.choose_command(result.suggestions)
         if not selected:
-            return
-        if selected == ConsoleUI.REGENERATE_CHOICE:
+            user_input = ui.get_prompt()
+            if should_exit(user_input):
+                return
             continue
-        executor.run(selected)
-        return
+        if selected == ConsoleUI.REGENERATE_CHOICE:
+            manual.record_regenerate_request(result.suggestions)
+            continue
+        execution = executor.execute(selected)
+        manual.record_command_result(
+            command=selected,
+            return_code=execution.returncode,
+            stdout=execution.stdout,
+            stderr=execution.stderr,
+            cwd=execution.cwd,
+        )
+        user_input = ui.get_prompt()
+        if should_exit(user_input):
+            return
 
 
 def run_auto(config: AppConfig, user_input: str | None) -> None:
