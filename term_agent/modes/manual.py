@@ -59,10 +59,6 @@ class ManualMode:
         )
         system_message = prompt_messages[0]
         current_message = prompt_messages[1]
-        # print("Manual prompt (system):")
-        # print(system_message.content)
-        # print("Manual prompt (user):")
-        # print(current_message.content)
         messages = [system_message, *self.history, current_message]
         response = self.chat_with_tools.invoke(messages)
         normalized_query = user_input.strip()
@@ -71,29 +67,10 @@ class ManualMode:
             self._persist_session_state()
         self.history.append(current_message)
         self.history.append(response)
-        tool_calls = getattr(response, "tool_calls", []) or []
-        for call in tool_calls:
-            if str(call.get("name", "")) != "generate_instructions":
-                continue
-            args = call.get("args", {}) or {}
-            commands_raw = args.get("commands", [])
-            if isinstance(commands_raw, list):
-                commands = [str(item) for item in commands_raw]
-            elif commands_raw is None:
-                commands = []
-            else:
-                commands = [str(commands_raw)]
-            descriptions_raw = args.get("descriptions", [])
-            if isinstance(descriptions_raw, list):
-                descriptions = [str(item) for item in descriptions_raw]
-            elif descriptions_raw is None:
-                descriptions = []
-            else:
-                descriptions = [str(descriptions_raw)]
-            suggestions = [
-                ManualSuggestion(command=str(command), description=str(description))
-                for command, description in zip(commands, descriptions)
-            ]
+        suggestions = self._extract_suggestions_from_tool_calls(
+            getattr(response, "tool_calls", []) or []
+        )
+        if suggestions:
             return ManualResult(suggestions=suggestions)
         return ManualResult(suggestions=[])
 
@@ -157,9 +134,6 @@ class ManualMode:
             f"- Stdout: {output_text}\n"
             f"- Stderr: {error_text}"
         )
-        # if return_code != 0 or stderr_text:
-        #     print("Command execution result (error or stderr detected):")
-        #     print(summary)
         self.result_records.append(summary)
         self._persist_session_state()
         self.history.append(HumanMessage(content=summary))
@@ -199,6 +173,30 @@ class ManualMode:
             for line in result_lines[1:]:
                 lines.append(f"     {line}")
         return "\n".join(lines)
+
+    def _extract_suggestions_from_tool_calls(self, tool_calls: List[dict]) -> List[ManualSuggestion]:
+        for call in tool_calls:
+            if str(call.get("name", "")) != "generate_instructions":
+                continue
+            args = call.get("args", {}) or {}
+            commands = self._normalize_string_list(args.get("commands", []))
+            descriptions = self._normalize_string_list(args.get("descriptions", []))
+            if not commands:
+                return []
+            if len(descriptions) < len(commands):
+                descriptions.extend([""] * (len(commands) - len(descriptions)))
+            return [
+                ManualSuggestion(command=command, description=descriptions[index])
+                for index, command in enumerate(commands)
+            ]
+        return []
+
+    def _normalize_string_list(self, raw: object) -> List[str]:
+        if isinstance(raw, list):
+            return [str(item) for item in raw]
+        if raw is None:
+            return []
+        return [str(raw)]
 
     def _load_session_state(self) -> dict[str, List[str]]:
         parent_pid = os.getppid()

@@ -81,21 +81,20 @@ class CommandExecutor:
 
     def _resolve_shell_command(self) -> str:
         if os.name == "nt":
-            return "powershell"
-        return os.environ.get("SHELL", "/bin/bash")
+            return "powershell.exe"
+        return os.environ.get("SHELL") or "/bin/bash"
 
     def _build_shell_args(self, command: str) -> list[str]:
         if os.name == "nt":
             return [self.shell_command, "-NoProfile", "-Command", command]
-        return [self.shell_command, "-lc", command]
+        return [self.shell_command, "-c", command]
 
     def _get_conda_activate_target(self, command: str) -> str | None:
         lowered = command.lower()
         if not lowered.startswith("conda activate"):
             return None
         target = command[len("conda activate") :].strip()
-        if target.startswith('"') and target.endswith('"') and len(target) >= 2:
-            target = target[1:-1]
+        target = self._strip_wrapping_quotes(target)
         return target or None
 
     def _is_conda_deactivate_command(self, command: str) -> bool:
@@ -106,8 +105,7 @@ class CommandExecutor:
         target = command[2:].strip()
         if target.lower().startswith("/d"):
             target = target[2:].strip()
-        if target.startswith('"') and target.endswith('"') and len(target) >= 2:
-            target = target[1:-1]
+        target = self._strip_wrapping_quotes(target)
         if not target:
             self.cwd = os.path.expanduser("~")
             print(self.cwd)
@@ -140,3 +138,10 @@ class CommandExecutor:
             stdout=f"{self.cwd}\n",
             stderr="",
         )
+
+    def _strip_wrapping_quotes(self, text: str) -> str:
+        if len(text) < 2:
+            return text
+        if (text[0] == '"' and text[-1] == '"') or (text[0] == "'" and text[-1] == "'"):
+            return text[1:-1]
+        return text

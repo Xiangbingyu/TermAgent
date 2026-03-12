@@ -5,6 +5,9 @@ import os
 
 def _config_path() -> str:
     if os.name == "nt":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            return os.path.join(appdata, "term-agent", "config.json")
         base = os.path.expanduser("~")
         return os.path.join(base, "AppData", "Roaming", "term-agent", "config.json")
     return os.path.expanduser("~/.config/term-agent/config.json")
@@ -39,22 +42,14 @@ class AppConfig:
     @staticmethod
     def load() -> "AppConfig":
         persisted = read_config()
-        api_base = (
-            persisted.get("api_base")
-            or "https://api.openai.com/v1"
-        )
-        api_key = (
-            persisted.get("api_key")
-            or ""
-        )
-        model = (
-            persisted.get("model")
-            or "gpt-4o-mini"
-        )
-        temperature = float(
-            persisted.get("temperature")
-            or "0.2"
-        )
+        api_base_raw = persisted.get("api_base")
+        api_key_raw = persisted.get("api_key")
+        model_raw = persisted.get("model")
+        temperature_raw = persisted.get("temperature")
+        api_base = str(api_base_raw) if api_base_raw else "https://api.openai.com/v1"
+        api_key = str(api_key_raw) if api_key_raw else ""
+        model = str(model_raw) if model_raw else "gpt-4o-mini"
+        temperature = float(temperature_raw) if temperature_raw is not None else 0.2
         return AppConfig(
             api_base=api_base,
             api_key=api_key,

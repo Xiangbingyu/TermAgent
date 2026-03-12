@@ -29,10 +29,8 @@ class ConsoleUI:
 
     def choose_command(self, suggestions: List[ManualSuggestion]) -> str | None:
         choices: List[Choice] = []
-        title_to_command: dict[str, str] = {}
         for suggestion in suggestions:
             title = f"{suggestion.command}\n# {suggestion.description}"
-            title_to_command[title] = suggestion.command
             choices.append(Choice(name=title, value=suggestion.command))
         choices.append(Choice(name="Generate a new suggestion", value=self.REGENERATE_CHOICE))
         choices.append(Choice(name="Dismiss", value=""))
@@ -41,8 +39,6 @@ class ConsoleUI:
             choices=choices,
             default=choices[0].value,
             cycle=False,
-            transformer=lambda result: title_to_command.get(str(result), str(result)),
-            filter=lambda result: title_to_command.get(str(result), str(result)),
         ).execute()
         if not selection:
             return None
