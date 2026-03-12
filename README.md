@@ -9,11 +9,28 @@ TermAgent is a terminal assistance system that helps users who are unfamiliar wi
 ## Model and API
 TermAgent uses OpenAI-compatible APIs. Use `term set` to configure the model and endpoint as long as the provider supports the OpenAI client interface.
 
+## Install
+### Install from TestPyPI
+```bash
+pip install -i https://test.pypi.org/simple/ term-agent
+```
+
 ## Quick Start
-python -m term_agent.main help
-python -m term_agent.main -h
-python -m term_agent.main set --api-key
-python -m term_agent.main set --api-base
-python -m term_agent.main set --model
-python -m term_agent.main run
-python -m term_agent.main run -m
+### 1) Check command help
+```bash
+term help
+term -h
+```
+
+### 2) Configure API settings
+```bash
+term set --api-key
+term set --api-base
+term set --model
+```
+
+### 3) Run TermAgent
+```bash
+term run
+term run -m
+```
