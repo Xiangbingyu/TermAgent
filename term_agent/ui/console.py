@@ -13,7 +13,14 @@ class ConsoleUI:
     def __init__(self) -> None:
         self.console = Console()
 
-    def get_prompt(self) -> str:
+    def get_prompt(
+        self, current_directory: str | None = None, conda_env: str | None = None
+    ) -> str:
+        if current_directory:
+            env_label = f" [conda:{conda_env}]" if conda_env else ""
+            return input(
+                f"\n({current_directory}){env_label} \u2192 Enter your request: "
+            ).strip()
         return input("Enter your request: ").strip()
 
     def show_suggestions(self, suggestions: List[ManualSuggestion]) -> None:
@@ -24,7 +31,7 @@ class ConsoleUI:
         choices: List[Choice] = []
         title_to_command: dict[str, str] = {}
         for suggestion in suggestions:
-            title = f"{suggestion.command}\n#「{suggestion.description}」"
+            title = f"{suggestion.command}\n# {suggestion.description}"
             title_to_command[title] = suggestion.command
             choices.append(Choice(name=title, value=suggestion.command))
         choices.append(Choice(name="Generate a new suggestion", value=self.REGENERATE_CHOICE))

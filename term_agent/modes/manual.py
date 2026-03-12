@@ -16,10 +16,10 @@ from term_agent.config import AppConfig
 
 class GenerateInstructionsArgs(BaseModel):
     commands: List[str] = Field(
-        description="候选可执行命令列表，每个命令应可直接在终端执行。"
+        description="Candidate executable commands. Each command must run directly in terminal."
     )
     descriptions: List[str] = Field(
-        description="与 commands 一一对应的中文说明列表。"
+        description="Descriptions aligned one-to-one with commands."
     )
 
 
@@ -28,29 +28,47 @@ class ManualMode:
         tool = StructuredTool.from_function(
             func=self.generate_instructions,
             name="generate_instructions",
-            description="生成最终指令与描述。参数: commands, descriptions。",
+            description="Generate final commands and descriptions. Args: commands, descriptions.",
             args_schema=GenerateInstructionsArgs,
         )
         self.chat = build_chat_model(config)
         self.chat_with_tools = self.chat.bind_tools([tool])
         self.prompt = manual_prompt()
         self.history: deque[BaseMessage] = deque(maxlen=80)
+        session_state = self._load_session_state()
         self.executed_commands: deque[str] = deque(
-            self._load_session_commands(),
+            session_state["commands"],
+            maxlen=200,
+        )
+        self.user_queries: deque[str] = deque(
+            session_state["user_queries"],
+            maxlen=200,
+        )
+        self.result_records: deque[str] = deque(
+            session_state["results"],
             maxlen=200,
         )
 
     def suggest(self, user_input: str, current_directory: str) -> ManualResult:
-        prompt_messages = self.prompt.format_messages(user_input=user_input)
+        prompt_messages = self.prompt.format_messages(
+            user_input=user_input,
+            basic_information_section=self._build_basic_information_section(
+                current_directory
+            ),
+            history_section=self._build_history_section(),
+        )
         system_message = prompt_messages[0]
-        current_message = HumanMessage(content=user_input)
-        runtime_message = self._build_runtime_message(current_directory)
-        command_history_message = self._build_command_history_message()
-        context_messages = [runtime_message, *self.history]
-        if command_history_message:
-            context_messages.append(command_history_message)
-        messages = [system_message, *context_messages, current_message]
+        current_message = prompt_messages[1]
+        # print("Manual prompt (system):")
+        # print(system_message.content)
+        # print("Manual prompt (user):")
+        # print(current_message.content)
+        messages = [system_message, *self.history, current_message]
         response = self.chat_with_tools.invoke(messages)
+        normalized_query = user_input.strip()
+        if normalized_query:
+            self.user_queries.append(normalized_query)
+            self._persist_session_state()
         self.history.append(current_message)
         self.history.append(response)
         tool_calls = getattr(response, "tool_calls", []) or []
@@ -58,10 +76,20 @@ class ManualMode:
             if str(call.get("name", "")) != "generate_instructions":
                 continue
             args = call.get("args", {}) or {}
-            commands_raw = args.get("commands", []) or []
-            descriptions_raw = args.get("descriptions", []) or []
-            commands = commands_raw if isinstance(commands_raw, list) else [commands_raw]
-            descriptions = descriptions_raw if isinstance(descriptions_raw, list) else [descriptions_raw]
+            commands_raw = args.get("commands", [])
+            if isinstance(commands_raw, list):
+                commands = [str(item) for item in commands_raw]
+            elif commands_raw is None:
+                commands = []
+            else:
+                commands = [str(commands_raw)]
+            descriptions_raw = args.get("descriptions", [])
+            if isinstance(descriptions_raw, list):
+                descriptions = [str(item) for item in descriptions_raw]
+            elif descriptions_raw is None:
+                descriptions = []
+            else:
+                descriptions = [str(descriptions_raw)]
             suggestions = [
                 ManualSuggestion(command=str(command), description=str(description))
                 for command, description in zip(commands, descriptions)
@@ -75,11 +103,15 @@ class ManualMode:
                 f"- {item.command} | {item.description}" for item in suggestions
             )
             content = (
-                "用户选择了 Generate a new suggestion，请基于以下已有候选继续优化：\n"
+                "User selected Generate a new suggestion. Refine from these candidates:\n"
                 f"{suggestion_lines}"
             )
         else:
-            content = "用户选择了 Generate a new suggestion，请继续生成新候选。"
+            content = (
+                "User selected Generate a new suggestion. Continue generating new candidates."
+            )
+        self.result_records.append(content)
+        self._persist_session_state()
         self.history.append(HumanMessage(content=content))
 
     def record_dismiss_request(self, suggestions: List[ManualSuggestion]) -> None:
@@ -88,22 +120,14 @@ class ManualMode:
                 f"- {item.command} | {item.description}" for item in suggestions
             )
             content = (
-                "用户选择了 Dismiss，本轮未执行命令。候选如下：\n"
+                "User selected Dismiss. No command was executed in this round. Candidates:\n"
                 f"{suggestion_lines}"
             )
         else:
-            content = "用户选择了 Dismiss，本轮未执行命令。"
-        self.executed_commands.append(content)
-        self._save_session_commands()
+            content = "User selected Dismiss. No command was executed in this round."
+        self.result_records.append(content)
+        self._persist_session_state()
         self.history.append(HumanMessage(content=content))
-
-    def record_executed_command(self, command: str) -> None:
-        normalized = command.strip()
-        if not normalized:
-            return
-        self.executed_commands.append(normalized)
-        self._save_session_commands()
-        self.history.append(HumanMessage(content=f"终端已执行命令: {normalized}"))
 
     def record_command_result(
         self,
@@ -116,72 +140,109 @@ class ManualMode:
         normalized = command.strip()
         if not normalized:
             return
-        stdout_text = self._limit_text(stdout.strip())
-        stderr_text = self._limit_text(stderr.strip())
-        output_text = stdout_text or "无"
-        error_text = stderr_text or "无"
+        self.executed_commands.append(normalized)
+        stdout_text = stdout.strip()
+        if len(stdout_text) > 1200:
+            stdout_text = f"{stdout_text[:1200]}...(truncated)"
+        stderr_text = stderr.strip()
+        if len(stderr_text) > 1200:
+            stderr_text = f"{stderr_text[:1200]}...(truncated)"
+        output_text = stdout_text or "None"
+        error_text = stderr_text or "None"
         summary = (
-            "命令执行结果:\n"
-            f"- 命令: {normalized}\n"
-            f"- 工作目录: {cwd}\n"
-            f"- 退出码: {return_code}\n"
-            f"- 标准输出: {output_text}\n"
-            f"- 错误输出: {error_text}"
+            "Command execution result:\n"
+            f"- Command: {normalized}\n"
+            f"- Working directory: {cwd}\n"
+            f"- Exit code: {return_code}\n"
+            f"- Stdout: {output_text}\n"
+            f"- Stderr: {error_text}"
         )
-        self.executed_commands.append(summary)
-        self._save_session_commands()
+        # if return_code != 0 or stderr_text:
+        #     print("Command execution result (error or stderr detected):")
+        #     print(summary)
+        self.result_records.append(summary)
+        self._persist_session_state()
         self.history.append(HumanMessage(content=summary))
 
-    def _build_command_history_message(self) -> HumanMessage | None:
-        if not self.executed_commands:
-            return None
-        commands = "\n".join(
-            f"{index + 1}. {command}"
-            for index, command in enumerate(self.executed_commands)
-        )
-        return HumanMessage(
-            content=(
-                "当前终端已执行命令记录（终端关闭后清空）：\n"
-                f"{commands}"
-            )
-        )
+    def record_user_query(self, query: str) -> None:
+        normalized = query.strip()
+        if not normalized:
+            return
+        self.user_queries.append(normalized)
+        self._persist_session_state()
 
-    def _build_runtime_message(self, current_directory: str) -> HumanMessage:
+    def _build_basic_information_section(self, current_directory: str) -> str:
         resolved_directory = current_directory.strip() or os.getcwd()
-        return HumanMessage(
-            content=(
-                "当前运行环境:\n"
-                f"- 操作系统: {platform.system()} ({os.name})\n"
-                f"- 当前目录: {resolved_directory}"
-            )
+        return "\n".join(
+            [
+                f"- Operating system: {platform.system()} ({os.name})",
+                f"- Working directory: {resolved_directory}",
+            ]
         )
 
-    def _limit_text(self, content: str, max_chars: int = 1200) -> str:
-        if len(content) <= max_chars:
-            return content
-        return f"{content[:max_chars]}...(已截断)"
+    def _build_history_section(self) -> str:
+        queries = list(self.user_queries)
+        commands = list(self.executed_commands)
+        results = list(self.result_records)
+        if not queries and not commands and not results:
+            return "0. No history available."
+        lines: List[str] = []
+        max_len = max(len(queries), len(commands), len(results))
+        for index in range(max_len):
+            query = queries[index] if index < len(queries) else "None"
+            command = commands[index] if index < len(commands) else "None"
+            result = results[index] if index < len(results) else "None"
+            lines.append(f"{index + 1}. Request: {query}")
+            lines.append(f"   - Command: {command}")
+            result_lines = str(result).splitlines() or [""]
+            lines.append(f"   - Result: {result_lines[0]}")
+            for line in result_lines[1:]:
+                lines.append(f"     {line}")
+        return "\n".join(lines)
 
-    def _session_file_path(self) -> str:
+    def _load_session_state(self) -> dict[str, List[str]]:
         parent_pid = os.getppid()
         base_dir = os.path.join(tempfile.gettempdir(), "term-agent-manual")
         os.makedirs(base_dir, exist_ok=True)
-        return os.path.join(base_dir, f"{parent_pid}.json")
-
-    def _load_session_commands(self) -> List[str]:
-        path = self._session_file_path()
+        path = os.path.join(base_dir, f"{parent_pid}.json")
         try:
             with open(path, "r", encoding="utf-8") as file:
                 payload = json.load(file)
         except (FileNotFoundError, json.JSONDecodeError):
-            return []
-        commands = payload.get("commands", [])
-        if not isinstance(commands, list):
-            return []
-        return [str(item) for item in commands]
+            return {"commands": [], "user_queries": [], "results": []}
+        if not isinstance(payload, dict):
+            return {"commands": [], "user_queries": [], "results": []}
+        commands_raw = payload.get("commands", [])
+        if isinstance(commands_raw, list):
+            commands = [str(item) for item in commands_raw]
+        else:
+            commands = []
+        user_queries_raw = payload.get("user_queries", [])
+        if isinstance(user_queries_raw, list):
+            user_queries = [str(item) for item in user_queries_raw]
+        else:
+            user_queries = []
+        results_raw = payload.get("results", [])
+        if isinstance(results_raw, list):
+            results = [str(item) for item in results_raw]
+        else:
+            results = []
+        return {
+            "commands": commands,
+            "user_queries": user_queries,
+            "results": results,
+        }
 
-    def _save_session_commands(self) -> None:
-        path = self._session_file_path()
-        payload = {"commands": list(self.executed_commands)}
+    def _persist_session_state(self) -> None:
+        payload = {
+            "commands": list(self.executed_commands),
+            "user_queries": list(self.user_queries),
+            "results": list(self.result_records),
+        }
+        parent_pid = os.getppid()
+        base_dir = os.path.join(tempfile.gettempdir(), "term-agent-manual")
+        os.makedirs(base_dir, exist_ok=True)
+        path = os.path.join(base_dir, f"{parent_pid}.json")
         with open(path, "w", encoding="utf-8") as file:
             json.dump(payload, file, ensure_ascii=False)
 
