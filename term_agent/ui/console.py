@@ -14,10 +14,10 @@ class ConsoleUI:
         self.console = Console()
 
     def get_prompt(
-        self, current_directory: str | None = None, conda_env: str | None = None
+        self, current_directory: str | None = None, python_prefix: str | None = None
     ) -> str:
         if current_directory:
-            env_label = f" [conda:{conda_env}]" if conda_env else ""
+            env_label = f" [python:{python_prefix}]" if python_prefix else ""
             return input(
                 f"\n({current_directory}){env_label} \u2192 Enter your request: "
             ).strip()

@@ -26,7 +26,7 @@ def run_manual(config: AppConfig) -> None:
     manual = ManualMode(config)
     executor = CommandExecutor()
     print("Hint: use @ to run a manual command, use \\q to quit.")
-    user_input = ui.get_prompt(executor.cwd, executor.conda_env)
+    user_input = ui.get_prompt(executor.cwd, executor.python_prefix)
     while True:
         if should_exit(user_input):
             return
@@ -41,14 +41,14 @@ def run_manual(config: AppConfig) -> None:
                 stderr=execution.stderr,
                 cwd=execution.cwd,
             )
-            user_input = ui.get_prompt(executor.cwd, executor.conda_env)
+            user_input = ui.get_prompt(executor.cwd, executor.python_prefix)
             continue
         result = manual.suggest(user_input, executor.cwd)
         ui.show_suggestions(result.suggestions)
         selected = ui.choose_command(result.suggestions)
         if not selected:
             manual.record_dismiss_request(result.suggestions)
-            user_input = ui.get_prompt(executor.cwd, executor.conda_env)
+            user_input = ui.get_prompt(executor.cwd, executor.python_prefix)
             if should_exit(user_input):
                 return
             continue
@@ -63,7 +63,7 @@ def run_manual(config: AppConfig) -> None:
             stderr=execution.stderr,
             cwd=execution.cwd,
         )
-        user_input = ui.get_prompt(executor.cwd, executor.conda_env)
+        user_input = ui.get_prompt(executor.cwd, executor.python_prefix)
         if should_exit(user_input):
             return
 
