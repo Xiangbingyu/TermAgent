@@ -12,7 +12,7 @@ TermAgent uses OpenAI-compatible APIs. Use `term set` to configure the model and
 ## Install
 ### Install from TestPyPI
 ```bash
-pip install -i https://test.pypi.org/simple/ term-agent
+pip install -i https://test.pypi.org/simple/ term-agent --extra-index-url https://pypi.org/simple/
 ```
 
 ## Quick Start

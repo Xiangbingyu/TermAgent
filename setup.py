@@ -8,7 +8,7 @@ with open("README.md", "r", encoding="utf-8") as f:
 
 setup(
     name="term-agent",
-    version="0.1.0",
+    version="0.1.1",
     author="TermAgent",
     long_description=long_description,
     long_description_content_type="text/markdown",
